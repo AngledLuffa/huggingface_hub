@@ -6,7 +6,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, List, Optional, Union
+from typing import Iterator, List, Optional, Tuple, Union
 
 from tqdm.auto import tqdm
 
@@ -18,6 +18,15 @@ from .utils import logging
 
 
 logger = logging.get_logger(__name__)
+
+
+class ActionInProgress:
+    def __init__(self, is_done_method):
+        self._is_done = is_done_method
+
+    @property
+    def is_done(self):
+        return self._is_done()
 
 
 def is_git_repo(folder: Union[str, Path]) -> bool:
@@ -152,6 +161,25 @@ def is_tracked_upstream(folder: Union[str, Path]) -> bool:
             raise OSError("No branch checked out")
 
         return False
+
+
+def commits_to_push(folder: Union[str, Path], upstream: Optional[str] = None) -> int:
+    """
+    Check the number of commits that would be pushed upstream
+    """
+    try:
+        command = f"git cherry -v {upstream or ''}"
+        result = subprocess.run(
+            command.split(),
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            encoding="utf-8",
+            check=True,
+            cwd=folder,
+        )
+        return len(result.stdout.split("\n")) - 1
+    except subprocess.CalledProcessError as exc:
+        raise EnvironmentError(exc.stderr)
 
 
 @contextmanager
@@ -804,29 +832,64 @@ class Repository:
             else:
                 raise EnvironmentError(exc.stdout)
 
-    def git_push(self, upstream=None) -> str:
+    def git_push(
+        self, upstream: Optional[str] = None, blocking: bool = True
+    ) -> Union[str, Tuple[str, ActionInProgress]]:
         """
         git push
 
         Returns url to commit on remote repo.
+
+        Args:
+            upstream (`str`, `optional`):
+                Upstream to which this should push. If not specified, will push
+                to the lastly defined upstream or to the default one (`origin main`).
+            blocking (`bool`, defaults to `True`):
+                Whether the function should return only when the push has finished.
+                Setting this to `False` will return an `ActionInProgress` object
+                which has an `is_done` property. This property will be set to
+                `True` when the push is finished.
         """
         command = "git push"
 
         if upstream:
             command += f" --set-upstream {upstream}"
 
+        number_of_commits = commits_to_push(self.local_dir, upstream)
+
+        if number_of_commits > 1:
+            logger.warning(
+                f"Several commits ({number_of_commits}) will be pushed upstream. "
+                "The progress bars may be unreliable."
+            )
+
         try:
             with lfs_log_progress():
-                subprocess.run(
+                process = subprocess.Popen(
                     command.split(),
                     stderr=subprocess.PIPE,
                     stdout=subprocess.PIPE,
-                    check=True,
                     encoding="utf-8",
                     cwd=self.local_dir,
                 )
+
+                if blocking:
+                    stdout, stderr = process.communicate()
+                    return_code = process.poll()
+                    process.kill()
+
+                    if return_code:
+                        raise subprocess.CalledProcessError(
+                            return_code, process.args, output=stdout, stderr=stderr
+                        )
+
         except subprocess.CalledProcessError as exc:
             raise EnvironmentError(exc.stderr)
+
+        if not blocking:
+            return self.git_head_commit_url(), ActionInProgress(
+                lambda: process.poll() == 0
+            )
 
         return self.git_head_commit_url()
 
