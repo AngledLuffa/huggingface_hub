@@ -6,7 +6,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple, Union
+from typing import Callable, Iterator, List, Optional, Tuple, Union
 
 from tqdm.auto import tqdm
 
@@ -21,7 +21,7 @@ logger = logging.get_logger(__name__)
 
 
 class ActionInProgress:
-    def __init__(self, is_done_method):
+    def __init__(self, is_done_method: Callable):
         self._is_done = is_done_method
 
     @property
@@ -669,7 +669,9 @@ class Repository:
 
         return deleted_files
 
-    def lfs_track(self, patterns: Union[str, List[str]], filename: bool = False):
+    def lfs_track(
+        self, patterns: Union[str, List[str]], filename: Optional[bool] = False
+    ):
         """
         Tell git-lfs to track those files.
 
@@ -736,7 +738,7 @@ class Repository:
         except subprocess.CalledProcessError as exc:
             raise EnvironmentError(exc.stderr)
 
-    def auto_track_large_files(self, pattern=".") -> List[str]:
+    def auto_track_large_files(self, pattern: Optional[str] = ".") -> List[str]:
         """
         Automatically track large files with git-lfs
         """
@@ -785,7 +787,9 @@ class Repository:
         except subprocess.CalledProcessError as exc:
             raise EnvironmentError(exc.stderr)
 
-    def git_add(self, pattern=".", auto_lfs_track=False):
+    def git_add(
+        self, pattern: Optional[str] = ".", auto_lfs_track: Optional[bool] = False
+    ):
         """
         git add
 
@@ -812,7 +816,7 @@ class Repository:
         except subprocess.CalledProcessError as exc:
             raise EnvironmentError(exc.stderr)
 
-    def git_commit(self, commit_message="commit files to HF hub"):
+    def git_commit(self, commit_message: str = "commit files to HF hub"):
         """
         git commit
         """
@@ -833,7 +837,7 @@ class Repository:
                 raise EnvironmentError(exc.stdout)
 
     def git_push(
-        self, upstream: Optional[str] = None, blocking: bool = True
+        self, upstream: Optional[str] = None, blocking: Optional[bool] = True
     ) -> Union[str, Tuple[str, ActionInProgress]]:
         """
         git push
@@ -893,7 +897,7 @@ class Repository:
 
         return self.git_head_commit_url()
 
-    def git_checkout(self, revision, create_branch_ok=False):
+    def git_checkout(self, revision: str, create_branch_ok: Optional[bool] = False):
         """
         git checkout a given revision
 
@@ -949,7 +953,8 @@ class Repository:
         self,
         commit_message: str,
         branch: Optional[str] = None,
-        track_large_files: bool = True,
+        track_large_files: Optional[bool] = True,
+        blocking: Optional[bool] = True,
     ):
         """
         Context manager utility to handle committing to a repository. This automatically tracks large files (>10Mb)
@@ -962,6 +967,8 @@ class Repository:
                 The branch on which the commit will appear. This branch will be checked-out before any operation.
             track_large_files (`bool`, `optional`, defaults to `True`):
                 Whether to automatically track large files or not. Will do so by default.
+            blocking (`bool`, `optional`, defaults to `True`):
+                Whether the function should return only when the `git push` has finished.
 
         Examples:
 
@@ -1015,7 +1022,9 @@ class Repository:
                     raise e
 
             try:
-                self.git_push(upstream=f"origin {self.current_branch}")
+                self.git_push(
+                    upstream=f"origin {self.current_branch}", blocking=blocking
+                )
             except OSError as e:
                 # If no changes are detected, there is nothing to commit.
                 if "could not read Username" in str(e):

@@ -256,6 +256,36 @@ class RepositoryTest(RepositoryCommonTest):
 
         shutil.rmtree(WORKING_REPO_DIR)
 
+    def test_add_commit_push_non_blocking(self):
+        repo = Repository(
+            WORKING_REPO_DIR,
+            clone_from=self._repo_url,
+            use_auth_token=self._token,
+            git_user="ci",
+            git_email="ci@dummy.com",
+        )
+
+        # Create dummy files
+        # one is lfs-tracked, the other is not.
+        with open(os.path.join(WORKING_REPO_DIR, "dummy.txt"), "w") as f:
+            f.write("hello")
+        with open(os.path.join(WORKING_REPO_DIR, "model.bin"), "w") as f:
+            f.write("hello")
+
+        repo.git_add()
+        repo.git_commit()
+        try:
+            url, result = repo.git_push(blocking=False)
+        except subprocess.CalledProcessError as exc:
+            print(exc.stderr)
+            raise exc
+        # Check that the returned commit url
+        # actually exists.
+        r = requests.head(url)
+        r.raise_for_status()
+
+        shutil.rmtree(WORKING_REPO_DIR)
+
     def test_clone_with_endpoint(self):
         clone = Repository(
             f"{WORKING_REPO_DIR}/{REPO_NAME}",
