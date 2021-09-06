@@ -21,12 +21,23 @@ logger = logging.get_logger(__name__)
 
 
 class ActionInProgress:
-    def __init__(self, is_done_method: Callable):
+    def __init__(
+        self,
+        is_done_method: Callable,
+        status_method: Callable,
+        process: subprocess.Popen,
+    ):
         self._is_done = is_done_method
+        self._status = status_method
+        self._process = process
 
     @property
     def is_done(self):
         return self._is_done()
+
+    @property
+    def status(self):
+        return self._status()
 
 
 def is_git_repo(folder: Union[str, Path]) -> bool:
@@ -891,8 +902,18 @@ class Repository:
             raise EnvironmentError(exc.stderr)
 
         if not blocking:
+
+            def status_method():
+                status = process.poll()
+                if status is None:
+                    return "running"
+                else:
+                    return status
+
             return self.git_head_commit_url(), ActionInProgress(
-                lambda: process.poll() == 0
+                is_done_method=lambda: process.poll() is not None,
+                status_method=status_method,
+                process=process,
             )
 
         return self.git_head_commit_url()

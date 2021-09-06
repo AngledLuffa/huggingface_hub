@@ -281,8 +281,58 @@ class RepositoryTest(RepositoryCommonTest):
             raise exc
         # Check that the returned commit url
         # actually exists.
+
+        if result._process.poll() is None:
+            self.assertEqual(result.status, "running")
+
+        while not result.is_done:
+            time.sleep(0.5)
+
+        self.assertTrue(result.is_done)
+        self.assertEqual(result.status, 0)
+
         r = requests.head(url)
         r.raise_for_status()
+
+        shutil.rmtree(WORKING_REPO_DIR)
+
+    def test_add_commit_push_non_blocking_process_killed(self):
+        repo = Repository(
+            WORKING_REPO_DIR,
+            clone_from=self._repo_url,
+            use_auth_token=self._token,
+            git_user="ci",
+            git_email="ci@dummy.com",
+        )
+
+        # Create dummy files
+        # one is lfs-tracked, the other is not.
+        with open(os.path.join(WORKING_REPO_DIR, "dummy.txt"), "w") as f:
+            f.write("hello")
+        with open(os.path.join(WORKING_REPO_DIR, "model.bin"), "w") as f:
+            f.write("hello")
+
+        repo.git_add()
+        repo.git_commit()
+        try:
+            url, result = repo.git_push(blocking=False)
+        except subprocess.CalledProcessError as exc:
+            print(exc.stderr)
+            raise exc
+        # Check that the returned commit url
+        # actually exists.
+
+        result._process.kill()
+
+        while result._process.poll() is None:
+            time.sleep(0.5)
+
+        self.assertTrue(result.is_done)
+        self.assertEqual(result.status, -9)
+
+        r = requests.head(url)
+        with self.assertRaises(requests.exceptions.HTTPError):
+            r.raise_for_status()
 
         shutil.rmtree(WORKING_REPO_DIR)
 
